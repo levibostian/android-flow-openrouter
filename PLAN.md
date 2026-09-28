@@ -31,37 +31,32 @@ Android app: floating mic bubble over any app. Hold to speak, release → speech
 
 Whisper-class audio models are gone from OpenRouter's catalog; the audio→text path is the **GPT-Audio** models (`openai/gpt-audio`, `openai/gpt-audio-mini` — verified present in `GET /api/v1/models`, `input_modalities: [text, audio]`, `output_modalities: [text, audio]`, text-only output when requested as a normal chat completion). Base URL `https://openrouter.ai/api/v1/chat/completions`, OpenAI-compatible.
 
-Payload (audio as `input_audio` content part):
+Payload — OpenRouter's audio-transcription endpoint (Whisper-style, verified against open-source clients `stt-bench` and `pyvideotrans`, see ticket 03):
 
 ```json
-POST https://openrouter.ai/api/v1/chat/completions
+POST https://openrouter.ai/api/v1/audio/transcriptions
 Authorization: Bearer sk-or-...
 Content-Type: application/json
 
 {
   "model": "openai/gpt-audio-mini",
-  "messages": [
-    {
-      "role": "user",
-      "content": [
-        { "type": "text", "text": "Transcribe the audio verbatim. Respond with only the transcript, no commentary." },
-        { "type": "input_audio", "input_audio": { "data": "data:audio/wav;base64,<base64>", "format": "wav" } }
-      ]
-    }
-  ]
+  "input_audio": {
+    "data": "<base64, no data: URL prefix>",
+    "format": "wav"
+  }
 }
 ```
 
-Response transcript: `choices[0].message.content` (text string; also handle array-of-text-parts shape defensively — gpt-audio can return content as parts). Extract text parts, concatenate, paste.
+Response transcript: `{ "text": "..." }` (plain string). No chat-completion content-part handling needed.
 
-⚠️ The exact `input_audio` part shape is the one live-API uncertainty — verifiable only with a key. Ticket 03 **validates it with a curl smoke test against the user's real key before wiring UI** (request minimal audio, e.g. a 2 s beep/speech).
+⚠️ Shape is from open-source inspection, not a live call. User's own API testing in ticket 03 is the final check — if a real key shows the API differs, update this section.
 
 ## Flow (runtime)
 
 1. User taps text field in any app → accessibility event → bubble appears (right edge)
 2. Hold bubble: `AudioRecord` streams PCM → appended to in-memory buffer (`ByteArrayOutputStream`)
-3. Release: stop mic → wrap PCM in 44-byte RIFF/WAV header → base64 → data URL → POST to OpenRouter (read timeout ~120 s for long clips; done off main thread)
-4. Parse `choices[0].message.content` → clipboard + `ACTION_PASTE` into focused field
+3. Release: stop mic → wrap PCM in 44-byte RIFF/WAV header → base64 → POST `input_audio` to `/audio/transcriptions` (read timeout ~120 s for long clips; done off main thread)
+4. Parse response `text` → clipboard + `ACTION_PASTE` into focused field
 5. Errors (bad key, wrong model, network, empty transcript) → toast, bubble back to idle
 
 ## Decisions & tradeoffs

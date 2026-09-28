@@ -20,13 +20,14 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
 import androidx.core.content.ContextCompat
+import earth.levi.flowopenrouter.client.OpenRouterClient
 import earth.levi.flowopenrouter.overlay.BubbleView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -39,6 +40,10 @@ class FloAccessibilityService : AccessibilityService() {
             private set
         private const val TAG = "FlowAccessibility"
         private const val SAMPLE_RATE = 16000
+        private const val PREFS_NAME = "flow_prefs"
+        private const val PREF_API_KEY = "flow_api_key"
+        private const val PREF_MODEL = "flow_model"
+        private const val DEFAULT_MODEL = "openai/gpt-audio-mini"
         private const val BYTES_PER_SECOND = SAMPLE_RATE * 2 // 16-bit mono
         // Hold without moving this long before recording starts, so taps and drags do nothing.
         private const val HOLD_TO_RECORD_MS = 250L
@@ -124,7 +129,7 @@ class FloAccessibilityService : AccessibilityService() {
                         pointerDown = false
                         holdJob?.cancel()
                         if (isRecording) {
-                            stopRecordingAndBuffer()
+                            stopRecordingAndTranscribe()
                         }
                         dragging = false
                         return true
@@ -283,7 +288,7 @@ class FloAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun stopRecordingAndBuffer() {
+    private fun stopRecordingAndTranscribe() {
         if (!isRecording) return
         isRecording = false
 
@@ -291,16 +296,38 @@ class FloAccessibilityService : AccessibilityService() {
         audioRecord?.release()
         audioRecord = null
 
-        val size = pcmBuffer.size()
-        Log.i(TAG, "Recording stopped, buffered $size bytes (${size / BYTES_PER_SECOND} s)")
+        val pcm = pcmBuffer.toByteArray()
+        Log.i(TAG, "Recording stopped, buffered ${pcm.size} bytes (${pcm.size / BYTES_PER_SECOND} s)")
 
-        // Ticket 03 plugs the OpenRouter request in here; for now the buffer goes nowhere.
         bubbleView?.setProcessing(true)
-        Toast.makeText(this, "Buffered ${size / 1024} kB of audio", Toast.LENGTH_SHORT).show()
         scope.launch {
-            delay(1500)
-            bubbleView?.setProcessing(false)
+            try {
+                val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                val apiKey = prefs.getString(PREF_API_KEY, "") ?: ""
+                val model = prefs.getString(PREF_MODEL, DEFAULT_MODEL) ?: DEFAULT_MODEL
+
+                val transcript = withContext(Dispatchers.IO) {
+                    OpenRouterClient.transcribe(pcm, apiKey, model)
+                }
+                if (transcript.isBlank()) {
+                    Log.w(TAG, "Empty transcript")
+                    showToast("No speech detected")
+                } else {
+                    Log.i(TAG, "Transcript: '$transcript'")
+                    pasteText(transcript)
+                    showToast("Pasted transcript")
+                }
+            } catch (e: OpenRouterClient.TranscriptionException) {
+                Log.e(TAG, "Transcription failed", e)
+                showToast(e.message ?: "Transcription failed")
+            } finally {
+                bubbleView?.setProcessing(false)
+            }
         }
+    }
+
+    private fun showToast(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
 
     override fun onInterrupt() {}
