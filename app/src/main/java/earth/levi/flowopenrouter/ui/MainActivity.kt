@@ -24,7 +24,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val PERMISSION_REQUEST_CODE = 100
         private const val PREFS_NAME = "flow_prefs"
-        private const val DEFAULT_MODEL = "openai/gpt-audio-mini"
+        private const val DEFAULT_MODEL = "openai/whisper-1"
     }
 
     private lateinit var apiKeyInput: EditText

@@ -29,9 +29,7 @@ Android app: floating mic bubble over any app. Hold to speak, release → speech
 
 ## How transcription works (OpenRouter)
 
-Whisper-class audio models are gone from OpenRouter's catalog; the audio→text path is the **GPT-Audio** models (`openai/gpt-audio`, `openai/gpt-audio-mini` — verified present in `GET /api/v1/models`, `input_modalities: [text, audio]`, `output_modalities: [text, audio]`, text-only output when requested as a normal chat completion). Base URL `https://openrouter.ai/api/v1/chat/completions`, OpenAI-compatible.
-
-Payload — OpenRouter's audio-transcription endpoint (Whisper-style, verified against open-source clients `stt-bench` and `pyvideotrans`, see ticket 03):
+OpenRouter's dedicated STT endpoint is `POST /api/v1/audio/transcriptions` (per official docs `guides/overview/multimodal/stt` + collection `speech-to-text-models`). STT models (`openai/whisper-1`, `openai/gpt-4o-transcribe`, `microsoft/mai-transcribe-2`, `qwen/qwen3-asr-*`, `deepgram/nova-3`, …) are **not returned by `GET /api/v1/models`** — they only resolve against the STT endpoint (live check: `openai/gpt-audio-mini` → 400 "does not exist"). Chat-audio models (`gpt-audio`/`gpt-audio-mini`) are NOT STT models and don't work here. Payload shape confirmed by official docs + open-source clients (`stt-bench`, `pyvideotrans`):
 
 ```json
 POST https://openrouter.ai/api/v1/audio/transcriptions
@@ -39,7 +37,7 @@ Authorization: Bearer sk-or-...
 Content-Type: application/json
 
 {
-  "model": "openai/gpt-audio-mini",
+  "model": "openai/whisper-1",
   "input_audio": {
     "data": "<base64, no data: URL prefix>",
     "format": "wav"
@@ -47,9 +45,7 @@ Content-Type: application/json
 }
 ```
 
-Response transcript: `{ "text": "..." }` (plain string). No chat-completion content-part handling needed.
-
-⚠️ Shape is from open-source inspection, not a live call. User's own API testing in ticket 03 is the final check — if a real key shows the API differs, update this section.
+Response transcript: `{ "text": "..." }` (plain string). `input_audio.data` is raw base64, NOT a `data:` URI (docs are explicit). Per-minute model pricing (`whisper-1`); note docs: split recordings longer than ~1 min processing time — upstream providers time out after 60 s/request.
 
 ## Flow (runtime)
 
@@ -64,7 +60,7 @@ Response transcript: `{ "text": "..." }` (plain string). No chat-completion cont
 - **Buffer-then-request** instead of streaming: OpenRouter has no streaming STT; one request per utterance is the whole design. Memory is fine (60 s ≈ 1.9 MB WAV → ~2.5 MB base64).
 - **`HttpURLConnection`** over OkHttp: one POST, no new dependency beyond coroutines (already present). If retries/multipart are ever needed, swap in OkHttp.
 - **API key in `SharedPreferences`** (plaintext) — same pattern as flo's settings; acceptable for personal sideloaded app. Note: don't ship key in APK or VCS.
-- **Default model `openai/gpt-audio-mini`** (cheapest audio input tier, `$0.60/M` input audio tokens per model listing). User-configurable field, no picker — text field keeps it future-proof.
+- **Default model `openai/whisper-1`** (canonical per docs, priced per audio minute, cheapest reliable STT). User-configurable field, no picker — text field keeps it future-proof.
 - **Keep flo's dual-path clipboard+paste** for transcript insertion — works across apps without IME hacks.
 - **Dead code removed, not ported**: upstream `FloOverlayService` is absent from its manifest, so only the accessibility service runs. One bubble, one service.
 

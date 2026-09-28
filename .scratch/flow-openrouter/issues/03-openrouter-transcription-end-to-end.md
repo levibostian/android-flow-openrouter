@@ -6,21 +6,17 @@
 
 **Status:** ready-for-agent
 
-- [x] **Payload shape validated from open-source code, not assumed** — the curl smoke test was replaced by source inspection (see below); user does live API+app testing
+- [x] **Payload shape validated from official docs, not assumed** — the curl smoke test was replaced by official docs + open-source client inspection (see below); user does live API+app testing
 - [ ] Release → WAV-wrapped base64 audio → POST → transcript extracted from response (network, non-2xx, and malformed responses covered)
 - [ ] Non-blank transcript pasted into the focused text field; app-in-background paste works
 - [ ] Error UX: bad key, insufficient credits, invalid model, network failure, empty transcript each produce a distinct toast; bubble returns to idle (orange state never stuck)
 - [ ] Full loop user-verified: real key + real model in a real app's text field → hold, speak, release → text appears at cursor
 
-## API shape (verified against open-source + docs)
+## API shape (verified against official docs)
 
-**Endpoint: `POST https://openrouter.ai/api/v1/audio/transcriptions`**
-(OpenRouter's audio feature / OpenAI-compatible transcription endpoint — NOT `chat/completions`).
+**Endpoint: `POST https://openrouter.ai/api/v1/audio/transcriptions`** — OpenRouter's dedicated STT endpoint.
 
-Confirmed by two actively-maintained open-source STT projects:
-
-- `chrisbennight/stt-bench` (`src/speaker_benchmark/adapters/openrouter.py`) — `ENDPOINT = "https://openrouter.ai/api/v1/audio/transcriptions"`
-- `jianchang512/pyvideotrans` (`videotrans/recognition/_openrouter.py`) — same endpoint, `input_audio` payload
+Confirmed by official docs (`/docs/guides/overview/multimodal/stt` + `/docs/guides/overview/multimodal/audio`) and open-source clients (`chrisbennight/stt-bench`, `jianchang512/pyvideotrans` — same endpoint + `input_audio` payload).
 
 Request body:
 
@@ -30,7 +26,7 @@ Authorization: Bearer sk-or-...
 Content-Type: application/json
 
 {
-  "model": "openai/gpt-audio-mini",
+  "model": "openai/whisper-1",
   "input_audio": {
     "data": "<base64, NO data: URL prefix>",
     "format": "wav"
@@ -45,7 +41,7 @@ Response — Whisper-style object, NOT chat completion:
 { "text": "the transcribed text" }
 ```
 
-⚠️ This supersedes the earlier PLAN.md payload (chat/completions + `input_audio` content part + `choices[0].message.content`), which was speculative. If user's live testing with a real key shows the other shape, revert PLAN.md accordingly.
+⚠️ **Model catalog trap**: `GET /api/v1/models` does NOT list STT models (whisper-1, gpt-4o-transcribe, mai-transcribe-2, qwen3-asr, nova-3, …) — they exist and only resolve against the STT endpoint. They're visible in the `speech-to-text-models` collection page. Chat-audio models (`openai/gpt-audio-mini`) are NOT valid here — verified live: HTTP 400 "Model openai/gpt-audio-mini does not exist". This is why the default model moved from `gpt-audio-mini` (chat-audio) to `openai/whisper-1` (STT).
 
 ## Error handling (per-response toasts)
 
@@ -53,7 +49,7 @@ Response — Whisper-style object, NOT chat completion:
 |---|---|
 | HTTP 401 | Invalid API key |
 | HTTP 402 | Out of OpenRouter credits |
-| HTTP 404 (or model error in body) | Model not found |
+| HTTP 404, or HTTP 400 `"does not exist"` in body | Model not found |
 | Network/connect/timeout | Network error, try again |
 | Parse error / malformed body | Unexpected API response |
 | Success, empty text | No speech detected |

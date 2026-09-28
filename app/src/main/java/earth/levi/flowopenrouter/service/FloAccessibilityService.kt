@@ -43,7 +43,7 @@ class FloAccessibilityService : AccessibilityService() {
         private const val PREFS_NAME = "flow_prefs"
         private const val PREF_API_KEY = "flow_api_key"
         private const val PREF_MODEL = "flow_model"
-        private const val DEFAULT_MODEL = "openai/gpt-audio-mini"
+        private const val DEFAULT_MODEL = "openai/whisper-1"
         private const val BYTES_PER_SECOND = SAMPLE_RATE * 2 // 16-bit mono
         // Hold without moving this long before recording starts, so taps and drags do nothing.
         private const val HOLD_TO_RECORD_MS = 250L

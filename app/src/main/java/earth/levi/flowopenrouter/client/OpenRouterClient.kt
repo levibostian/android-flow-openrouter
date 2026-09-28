@@ -11,9 +11,11 @@ import java.net.URL
 /**
  * Minimal OpenRouter transcription client.
  *
- * Endpoint: POST /api/v1/audio/transcriptions (Whisper-style, not chat completions).
- * Shape verified against open-source clients (stt-bench, pyvideotrans) — see ticket 03.
- * One request per utterance; no streaming.
+ * Endpoint: POST /api/v1/audio/transcriptions — OpenRouter's dedicated STT
+ * endpoint. Takes STT-class models (openai/whisper-1, openai/gpt-4o-transcribe,
+ * microsoft/mai-transcribe-2, qwen/qwen3-asr-*, ...); chat-audio models like
+ * openai/gpt-audio-mini are rejected with "does not exist". Verified against
+ * the official docs (guides/overview/multimodal/audio + .../stt).
  */
 object OpenRouterClient {
 
@@ -40,6 +42,7 @@ object OpenRouterClient {
         if (apiKey.isBlank()) throw TranscriptionException.InvalidKey()
 
         val base64 = Base64.encodeToString(wrapWav(pcm), Base64.NO_WRAP)
+        // input_audio.data must be raw base64, not a data URI (per docs).
         val payload = buildString {
             append("{\"model\":\"").append(jsonEscape(model))
                 .append("\",\"input_audio\":{\"data\":\"").append(base64)
@@ -82,7 +85,7 @@ object OpenRouterClient {
         Log.i(TAG, "Got transcript (${text.length} chars)")
         text
     } catch (e: Exception) {
-        Log.e(TAG, "Malformed response: $body", e)
+        Log.e(TAG, "Malformed response: ${body.take(500)}", e)
         throw TranscriptionException.BadResponse()
     }
 
@@ -92,6 +95,10 @@ object OpenRouterClient {
             JSONObject(errorBody).optJSONObject("error")?.optString("message") ?: errorBody
         } catch (_: Exception) {
             errorBody
+        }
+        // "Model x does not exist" comes back as HTTP 400 on OpenRouter.
+        if (code == 400 && serverMessage.contains("does not exist")) {
+            return TranscriptionException.InvalidModel()
         }
         return when (code) {
             401 -> TranscriptionException.InvalidKey()
