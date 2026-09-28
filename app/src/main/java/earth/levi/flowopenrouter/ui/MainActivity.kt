@@ -29,6 +29,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var apiKeyInput: EditText
     private lateinit var modelInput: EditText
+    private lateinit var browseModelsButton: Button
     private lateinit var statusText: TextView
     private lateinit var saveButton: Button
     private lateinit var enableAccessibilityButton: Button
@@ -40,6 +41,7 @@ class MainActivity : AppCompatActivity() {
 
         apiKeyInput = findViewById(R.id.api_key_input)
         modelInput = findViewById(R.id.model_input)
+        browseModelsButton = findViewById(R.id.browse_models_button)
         statusText = findViewById(R.id.status_text)
         saveButton = findViewById(R.id.save_button)
         enableAccessibilityButton = findViewById(R.id.enable_accessibility_button)
@@ -59,6 +61,15 @@ class MainActivity : AppCompatActivity() {
                 Uri.parse("package:$packageName")
             )
             startActivity(intent)
+        }
+
+        browseModelsButton.setOnClickListener {
+            startActivity(
+                Intent(
+                    Intent.ACTION_VIEW,
+                    Uri.parse("https://openrouter.ai/collections/speech-to-text-models")
+                )
+            )
         }
 
         requestPermissions()
