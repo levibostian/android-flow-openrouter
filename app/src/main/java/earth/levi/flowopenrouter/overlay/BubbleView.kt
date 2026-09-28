@@ -1,4 +1,4 @@
-package com.flo.whisper.overlay
+package earth.levi.flowopenrouter.overlay
 
 import android.animation.ValueAnimator
 import android.content.Context
@@ -9,7 +9,7 @@ import android.util.AttributeSet
 import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.core.content.ContextCompat
-import com.flo.whisper.R
+import earth.levi.flowopenrouter.R
 
 class BubbleView @JvmOverloads constructor(
     context: Context,

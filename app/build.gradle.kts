@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.flo.whisper"
+    namespace = "earth.levi.flowopenrouter"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.flo.whisper"
+        applicationId = "earth.levi.flowopenrouter"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

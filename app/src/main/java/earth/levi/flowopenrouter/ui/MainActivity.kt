@@ -1,4 +1,4 @@
-package com.flo.whisper.ui
+package earth.levi.flowopenrouter.ui
 
 import android.Manifest
 import android.accessibilityservice.AccessibilityServiceInfo
@@ -16,18 +16,19 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.flo.whisper.R
+import earth.levi.flowopenrouter.R
+import earth.levi.flowopenrouter.service.FloAccessibilityService
 
 class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val PERMISSION_REQUEST_CODE = 100
-        private const val OVERLAY_REQUEST_CODE = 101
+        private const val PREFS_NAME = "flow_prefs"
+        private const val DEFAULT_MODEL = "openai/gpt-audio-mini"
     }
 
-    private lateinit var hostInput: EditText
-    private lateinit var portInput: EditText
-    private lateinit var languageInput: EditText
+    private lateinit var apiKeyInput: EditText
+    private lateinit var modelInput: EditText
     private lateinit var statusText: TextView
     private lateinit var saveButton: Button
     private lateinit var enableAccessibilityButton: Button
@@ -37,9 +38,8 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        hostInput = findViewById(R.id.host_input)
-        portInput = findViewById(R.id.port_input)
-        languageInput = findViewById(R.id.language_input)
+        apiKeyInput = findViewById(R.id.api_key_input)
+        modelInput = findViewById(R.id.model_input)
         statusText = findViewById(R.id.status_text)
         saveButton = findViewById(R.id.save_button)
         enableAccessibilityButton = findViewById(R.id.enable_accessibility_button)
@@ -70,21 +70,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadPrefs() {
-        val prefs = getSharedPreferences("flo_prefs", Context.MODE_PRIVATE)
-        hostInput.setText(prefs.getString("host", "192.168.1.100"))
-        portInput.setText(prefs.getInt("port", 10300).toString())
-        languageInput.setText(prefs.getString("language", "en"))
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        apiKeyInput.setText(prefs.getString(getString(R.string.pref_api_key), ""))
+        modelInput.setText(prefs.getString(getString(R.string.pref_model), DEFAULT_MODEL))
     }
 
     private fun savePrefs() {
-        val host = hostInput.text.toString().trim()
-        val port = portInput.text.toString().trim().toIntOrNull() ?: 10300
-        val language = languageInput.text.toString().trim().ifEmpty { "en" }
+        val apiKey = apiKeyInput.text.toString().trim()
+        val model = modelInput.text.toString().trim().ifEmpty { DEFAULT_MODEL }
 
-        getSharedPreferences("flo_prefs", Context.MODE_PRIVATE).edit().apply {
-            putString("host", host)
-            putInt("port", port)
-            putString("language", language)
+        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().apply {
+            putString(getString(R.string.pref_api_key), apiKey)
+            putString(getString(R.string.pref_model), model)
             apply()
         }
         Toast.makeText(this, "Settings saved", Toast.LENGTH_SHORT).show()
@@ -134,7 +131,7 @@ class MainActivity : AppCompatActivity() {
         val enabledServices = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
         return enabledServices.any {
             it.resolveInfo.serviceInfo.packageName == packageName &&
-            it.resolveInfo.serviceInfo.name == "com.flo.whisper.service.FloAccessibilityService"
+            it.resolveInfo.serviceInfo.name == FloAccessibilityService::class.java.name
         }
     }
 }

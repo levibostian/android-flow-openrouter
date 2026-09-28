@@ -8,9 +8,9 @@
     <application
         android:allowBackup="true"
         android:icon="@drawable/ic_mic"
-        android:label="Flo"
+        android:label="Flow"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Flo">
+        android:theme="@style/Theme.Flow">
 
         <activity
             android:name=".ui.MainActivity"
