@@ -27,7 +27,8 @@ object OpenRouterClient {
     sealed class TranscriptionException(message: String, cause: Throwable? = null) : Exception(message, cause) {
         class InvalidKey : TranscriptionException("Invalid API key")
         class InsufficientCredits : TranscriptionException("Out of OpenRouter credits")
-        class InvalidModel : TranscriptionException("Model not found")
+        class InvalidModel(val serverMessage: String) :
+            TranscriptionException("Model not found: $serverMessage")
         class NetworkError(cause: Throwable?) : TranscriptionException("Network error", cause)
         class BadResponse : TranscriptionException("Unexpected API response")
         class ApiError(val code: Int, serverMessage: String) :
@@ -40,6 +41,7 @@ object OpenRouterClient {
      */
     fun transcribe(pcm: ByteArray, apiKey: String, model: String): String {
         if (apiKey.isBlank()) throw TranscriptionException.InvalidKey()
+        Log.i(TAG, "Transcribing with model='$model', ${pcm.size} PCM bytes")
 
         val base64 = Base64.encodeToString(wrapWav(pcm), Base64.NO_WRAP)
         // input_audio.data must be raw base64, not a data URI (per docs).
@@ -96,14 +98,15 @@ object OpenRouterClient {
         } catch (_: Exception) {
             errorBody
         }
+        Log.e(TAG, "OpenRouter HTTP $code, body: ${errorBody.take(500)}")
         // "Model x does not exist" comes back as HTTP 400 on OpenRouter.
         if (code == 400 && serverMessage.contains("does not exist")) {
-            return TranscriptionException.InvalidModel()
+            return TranscriptionException.InvalidModel(serverMessage)
         }
         return when (code) {
             401 -> TranscriptionException.InvalidKey()
             402 -> TranscriptionException.InsufficientCredits()
-            404 -> TranscriptionException.InvalidModel()
+            404 -> TranscriptionException.InvalidModel(serverMessage)
             else -> TranscriptionException.ApiError(code, serverMessage)
         }
     }
