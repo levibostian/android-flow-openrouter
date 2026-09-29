@@ -1,5 +1,7 @@
 # Flow
 
+> Note: App made by ai. I purposely have not polished the app wanting it "good enough" for my own personal phone use. 
+
 Voice-to-text Android app: a floating mic bubble over any app. Hold to speak, release — speech is transcribed and pasted into the focused text field.
 
 Transcription runs through [OpenRouter](https://openrouter.ai) using a GPT-Audio model (`openai/gpt-audio-mini` by default). You supply your own OpenRouter API key — no server to run.
