@@ -10,14 +10,26 @@ android {
         applicationId = "earth.levi.flowopenrouter"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        // CI sets these (see .github/workflows/deploy-app.yml) to stamp each release.
+        versionCode = System.getenv("ANDROID_APP_BUILD_NUMBER")?.toInt() ?: 1
+        versionName = System.getenv("ANDROID_APP_VERSION_NAME") ?: "1.0"
+    }
+
+    signingConfigs {
+        create("release") {
+            // CI provides these (see .github/workflows/deploy-app.yml). Fake path avoids a file() error during local dev.
+            storeFile = file(System.getenv("ANDROID_SIGNING_KEY_FILE_PATH") ?: "/fake/path")
+            keyAlias = "upload"
+            storePassword = System.getenv("ANDROID_SIGNING_KEY_STORE_PASSWORD")
+            keyPassword = System.getenv("ANDROID_SIGNING_KEY_PASSWORD")
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
