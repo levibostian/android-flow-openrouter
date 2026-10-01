@@ -21,55 +21,144 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Voice-to-text via OpenRouter"
+            android:text="Voice-to-text"
             android:textSize="14sp"
             android:alpha="0.7"
             android:layout_marginBottom="32dp" />
 
-        <!-- OpenRouter Settings -->
+        <!-- Transcription route -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="OpenRouter"
+            android:text="Transcription"
             android:textSize="18sp"
             android:textStyle="bold"
-            android:layout_marginBottom="12dp" />
+            android:layout_marginBottom="4dp" />
 
-        <com.google.android.material.textfield.TextInputLayout
+        <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="API key"
-            android:layout_marginBottom="8dp"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+            android:text="Where speech is turned into text."
+            android:textSize="13sp"
+            android:alpha="0.7"
+            android:layout_marginBottom="8dp" />
 
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/api_key_input"
+        <RadioGroup
+            android:id="@+id/route_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="32dp">
+
+            <RadioButton
+                android:id="@+id/route_on_device"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:inputType="textPassword" />
-        </com.google.android.material.textfield.TextInputLayout>
+                android:text="On-device (offline)" />
 
-        <Button
-            android:id="@+id/browse_models_button"
+            <RadioButton
+                android:id="@+id/route_openrouter"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="OpenRouter (cloud)" />
+        </RadioGroup>
+
+        <!-- OpenRouter Settings -->
+        <LinearLayout
+            android:id="@+id/openrouter_section"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Browse available models"
-            android:layout_marginBottom="16dp"
-            style="@style/Widget.Material3.Button.TextButton" />
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="OpenRouter"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="12dp" />
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="API key"
+                android:layout_marginBottom="8dp"
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/api_key_input"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textPassword" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <Button
+                android:id="@+id/browse_models_button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Browse available models"
+                android:layout_marginBottom="16dp"
+                style="@style/Widget.Material3.Button.TextButton" />
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Model"
+                android:layout_marginBottom="16dp"
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/model_input"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textNoSuggestions" />
+            </com.google.android.material.textfield.TextInputLayout>
+        </LinearLayout>
+
+        <!-- Transcript cleanup -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Cleanup"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Send the transcript to an OpenRouter chat model to fix spelling and grammar before pasting. Uses the API key above."
+            android:textSize="13sp"
+            android:alpha="0.7"
+            android:layout_marginBottom="8dp" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/cleanup_switch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Fix spelling &amp; grammar"
+            android:layout_marginBottom="8dp" />
 
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Model"
-            android:layout_marginBottom="16dp"
+            android:hint="Cleanup model"
+            android:layout_marginBottom="4dp"
             style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
 
             <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/model_input"
+                android:id="@+id/cleanup_model_input"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:inputType="textNoSuggestions" />
         </com.google.android.material.textfield.TextInputLayout>
+
+        <Button
+            android:id="@+id/browse_cleanup_models_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Browse chat models"
+            android:layout_marginBottom="32dp"
+            style="@style/Widget.Material3.Button.TextButton" />
 
         <Button
             android:id="@+id/save_button"

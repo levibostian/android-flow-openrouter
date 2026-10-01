@@ -7,9 +7,6 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.PixelFormat
-import android.media.AudioFormat
-import android.media.AudioRecord
-import android.media.MediaRecorder
 import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
@@ -20,36 +17,35 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
 import androidx.core.content.ContextCompat
-import earth.levi.flowopenrouter.client.OpenRouterClient
 import earth.levi.flowopenrouter.overlay.BubbleView
+import earth.levi.flowopenrouter.transcribe.CleanupTranscriber
+import earth.levi.flowopenrouter.transcribe.OnDeviceTranscriber
+import earth.levi.flowopenrouter.transcribe.OpenRouterTranscriber
+import earth.levi.flowopenrouter.transcribe.Transcriber
+import earth.levi.flowopenrouter.transcribe.TranscriptionRoute
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
 
+/**
+ * Floating mic bubble over any app: detects a focused text field, shows the
+ * bubble, drives a [Transcriber] on hold/release, and pastes the result.
+ *
+ * Transcription itself lives in `transcribe/` — this class knows nothing about
+ * mics, recognizers, or OpenRouter.
+ */
 class FloAccessibilityService : AccessibilityService() {
 
     companion object {
         var instance: FloAccessibilityService? = null
             private set
         private const val TAG = "FlowAccessibility"
-        private const val SAMPLE_RATE = 16000
-        private const val PREFS_NAME = "flow_prefs"
-        private const val PREF_API_KEY = "flow_api_key"
-        private const val PREF_MODEL = "flow_model"
-        private const val DEFAULT_MODEL = "openai/whisper-1"
-        private const val BYTES_PER_SECOND = SAMPLE_RATE * 2 // 16-bit mono
         // Hold without moving this long before recording starts, so taps and drags do nothing.
         private const val HOLD_TO_RECORD_MS = 250L
-        // 5 min cap ≈ 9.6 MB PCM; keeps in-memory recording bounded.
-        private const val MAX_RECORD_SECONDS = 300
-        private const val MAX_BUFFER_BYTES = BYTES_PER_SECOND * MAX_RECORD_SECONDS
     }
 
     private var focusedNode: AccessibilityNodeInfo? = null
@@ -58,22 +54,44 @@ class FloAccessibilityService : AccessibilityService() {
     private var windowManager: WindowManager? = null
     private var bubbleParams: WindowManager.LayoutParams? = null
 
+    private var transcriber: Transcriber? = null
+    private var currentRoute: TranscriptionRoute? = null
+
     @Volatile
     private var isRecording = false
-    private var audioRecord: AudioRecord? = null
-    private var pcmBuffer = ByteArrayOutputStream()
-    private var recordingJob: Job? = null
     private var holdJob: Job? = null
     private var pointerDown = false
     private var dragging = false
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+    private val transcriptionCallback = object : Transcriber.Callback {
+        override fun onTranscript(text: String) {
+            endSession()
+            if (text.isBlank()) {
+                Log.w(TAG, "Empty transcript")
+                showToast("No speech detected")
+            } else {
+                Log.i(TAG, "Transcript: '$text'")
+                pasteText(text)
+                showToast("Pasted transcript")
+            }
+        }
+
+        override fun onError(message: String) {
+            endSession()
+            Log.e(TAG, "Transcription failed: $message")
+            showToast(message)
+        }
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
         Log.i(TAG, "Accessibility service connected")
+
+        transcriberForCurrentRoute()
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         bubbleView = BubbleView(this)
@@ -129,7 +147,7 @@ class FloAccessibilityService : AccessibilityService() {
                         pointerDown = false
                         holdJob?.cancel()
                         if (isRecording) {
-                            stopRecordingAndTranscribe()
+                            stopRecording()
                         }
                         dragging = false
                         return true
@@ -219,111 +237,50 @@ class FloAccessibilityService : AccessibilityService() {
         ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) ==
                 PackageManager.PERMISSION_GRANTED
 
-    @SuppressLint("MissingPermission")
     private fun startRecording() {
         if (isRecording || !micPermissionGranted()) {
-            Toast.makeText(this, "Microphone permission missing — enable it in the Flow app settings", Toast.LENGTH_LONG).show()
+            showToast("Microphone permission missing — enable it in the Flow app settings")
             return
         }
-
         isRecording = true
         bubbleView?.setRecording(true)
-        pcmBuffer = ByteArrayOutputStream()
-
-        val bufferSize = AudioRecord.getMinBufferSize(
-            SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT
-        ).coerceAtLeast(BYTES_PER_SECOND)
-
-        try {
-            audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.MIC,
-                SAMPLE_RATE,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT,
-                bufferSize
-            )
-            audioRecord!!.startRecording()
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start AudioRecord", e)
-            Toast.makeText(this, "Could not start recording: ${e.message}", Toast.LENGTH_LONG).show()
-            isRecording = false
-            audioRecord?.release()
-            audioRecord = null
-            bubbleView?.setRecording(false)
-            return
-        }
-
-        Log.i(TAG, "Recording started, sample rate: ${audioRecord!!.sampleRate}")
-        Toast.makeText(this, "Recording…", Toast.LENGTH_SHORT).show()
-
-        recordingJob = scope.launch {
-            val chunkSize = BYTES_PER_SECOND // 0.5 s of 16-bit mono
-            val buffer = ByteArray(chunkSize)
-            try {
-                withContext(Dispatchers.IO) {
-                    while (isRecording && isActive) {
-                        val read = audioRecord!!.read(buffer, 0, chunkSize)
-                        if (read > 0) {
-                            pcmBuffer.write(buffer, 0, read)
-                            if (pcmBuffer.size() >= MAX_BUFFER_BYTES) {
-                                Log.i(TAG, "Recording hit $MAX_RECORD_SECONDS s cap, stopping")
-                                withContext(Dispatchers.Main) {
-                                    Toast.makeText(this@FloAccessibilityService, "Max recording time reached", Toast.LENGTH_SHORT).show()
-                                }
-                                break
-                            }
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Recording error", e)
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(this@FloAccessibilityService, "Recording error: ${e.message}", Toast.LENGTH_LONG).show()
-                }
-                isRecording = false
-                bubbleView?.post { bubbleView?.setRecording(false) }
-            }
-        }
+        transcriberForCurrentRoute().start()
     }
 
-    private fun stopRecordingAndTranscribe() {
-        if (!isRecording) return
-        isRecording = false
+    /** Rebuilds the backend only when the saved route changed, so the UI toggle applies on next press. */
+    private fun transcriberForCurrentRoute(): Transcriber {
+        val route = TranscriptionRoute.selected(this)
+        val existing = transcriber
+        if (existing != null && route == currentRoute) return existing
 
-        audioRecord?.stop()
-        audioRecord?.release()
-        audioRecord = null
-
-        val pcm = pcmBuffer.toByteArray()
-        Log.i(TAG, "Recording stopped, buffered ${pcm.size} bytes (${pcm.size / BYTES_PER_SECOND} s)")
-
-        bubbleView?.setProcessing(true)
-        scope.launch {
-            try {
-                val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                val apiKey = prefs.getString(PREF_API_KEY, "") ?: ""
-                val model = prefs.getString(PREF_MODEL, DEFAULT_MODEL) ?: DEFAULT_MODEL
-
-                val transcript = withContext(Dispatchers.IO) {
-                    OpenRouterClient.transcribe(pcm, apiKey, model)
-                }
-                if (transcript.isBlank()) {
-                    Log.w(TAG, "Empty transcript")
-                    showToast("No speech detected")
-                } else {
-                    Log.i(TAG, "Transcript: '$transcript'")
-                    pasteText(transcript)
-                    showToast("Pasted transcript")
-                }
-            } catch (e: OpenRouterClient.TranscriptionException) {
-                Log.e(TAG, "Transcription failed", e)
-                showToast(e.message ?: "Transcription failed")
-            } finally {
-                bubbleView?.setProcessing(false)
+        existing?.release()
+        // Cleanup wraps whichever backend the route picks, so it applies to
+        // on-device transcripts too.
+        val next = CleanupTranscriber(this, transcriptionCallback) { backendCallback ->
+            when (route) {
+                TranscriptionRoute.ON_DEVICE ->
+                    OnDeviceTranscriber.create(this, backendCallback)
+                        ?: OpenRouterTranscriber(this, backendCallback)
+                TranscriptionRoute.OPENROUTER -> OpenRouterTranscriber(this, backendCallback)
             }
         }
+        transcriber = next
+        currentRoute = route
+        Log.i(TAG, "Transcription route: $route")
+        return next
+    }
+
+    private fun stopRecording() {
+        if (!isRecording) return
+        isRecording = false
+        // Transcript arrives asynchronously via transcriptionCallback.
+        bubbleView?.setProcessing(true)
+        transcriber?.stop()
+    }
+
+    private fun endSession() {
+        isRecording = false
+        bubbleView?.setProcessing(false)
     }
 
     private fun showToast(message: String) {
@@ -336,12 +293,8 @@ class FloAccessibilityService : AccessibilityService() {
         instance = null
         isRecording = false
         holdJob?.cancel()
-        recordingJob?.cancel()
         scope.cancel()
-        audioRecord?.let {
-            try { it.stop() } catch (_: Exception) {}
-            it.release()
-        }
+        transcriber?.release()
         bubbleView?.let {
             try { windowManager?.removeView(it) } catch (_: Exception) {}
         }
