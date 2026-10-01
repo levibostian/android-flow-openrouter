@@ -18,6 +18,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import earth.levi.flowopenrouter.overlay.BubbleView
+import earth.levi.flowopenrouter.transcribe.CleanupTranscriber
 import earth.levi.flowopenrouter.transcribe.OnDeviceTranscriber
 import earth.levi.flowopenrouter.transcribe.OpenRouterTranscriber
 import earth.levi.flowopenrouter.transcribe.Transcriber
@@ -253,11 +254,15 @@ class FloAccessibilityService : AccessibilityService() {
         if (existing != null && route == currentRoute) return existing
 
         existing?.release()
-        val next = when (route) {
-            TranscriptionRoute.ON_DEVICE ->
-                OnDeviceTranscriber.create(this, transcriptionCallback)
-                    ?: OpenRouterTranscriber(this, transcriptionCallback)
-            TranscriptionRoute.OPENROUTER -> OpenRouterTranscriber(this, transcriptionCallback)
+        // Cleanup wraps whichever backend the route picks, so it applies to
+        // on-device transcripts too.
+        val next = CleanupTranscriber(this, transcriptionCallback) { backendCallback ->
+            when (route) {
+                TranscriptionRoute.ON_DEVICE ->
+                    OnDeviceTranscriber.create(this, backendCallback)
+                        ?: OpenRouterTranscriber(this, backendCallback)
+                TranscriptionRoute.OPENROUTER -> OpenRouterTranscriber(this, backendCallback)
+            }
         }
         transcriber = next
         currentRoute = route

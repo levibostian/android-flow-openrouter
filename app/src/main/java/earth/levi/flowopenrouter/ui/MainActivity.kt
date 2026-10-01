@@ -19,8 +19,10 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.google.android.material.materialswitch.MaterialSwitch
 import earth.levi.flowopenrouter.R
 import earth.levi.flowopenrouter.service.FloAccessibilityService
+import earth.levi.flowopenrouter.transcribe.TranscriptCleanup
 import earth.levi.flowopenrouter.transcribe.TranscriptionRoute
 
 class MainActivity : AppCompatActivity() {
@@ -37,6 +39,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var apiKeyInput: EditText
     private lateinit var modelInput: EditText
     private lateinit var browseModelsButton: Button
+    private lateinit var cleanupSwitch: MaterialSwitch
+    private lateinit var cleanupModelInput: EditText
+    private lateinit var browseCleanupModelsButton: Button
     private lateinit var statusText: TextView
     private lateinit var saveButton: Button
     private lateinit var enableAccessibilityButton: Button
@@ -49,6 +54,9 @@ class MainActivity : AppCompatActivity() {
         apiKeyInput = findViewById(R.id.api_key_input)
         modelInput = findViewById(R.id.model_input)
         browseModelsButton = findViewById(R.id.browse_models_button)
+        cleanupSwitch = findViewById(R.id.cleanup_switch)
+        cleanupModelInput = findViewById(R.id.cleanup_model_input)
+        browseCleanupModelsButton = findViewById(R.id.browse_cleanup_models_button)
         statusText = findViewById(R.id.status_text)
         saveButton = findViewById(R.id.save_button)
         enableAccessibilityButton = findViewById(R.id.enable_accessibility_button)
@@ -57,8 +65,18 @@ class MainActivity : AppCompatActivity() {
         routeOnDevice = findViewById(R.id.route_on_device)
         openRouterSection = findViewById(R.id.openrouter_section)
 
-        setupRouteUi()
+        // loadPrefs before setupRouteUi: applyRouteUi reads the cleanup switch.
         loadPrefs()
+        setupRouteUi()
+
+        cleanupSwitch.setOnCheckedChangeListener { _, checked ->
+            TranscriptCleanup.save(this, checked, cleanupModelInput.text.toString().trim())
+            applyRouteUi(TranscriptionRoute.selected(this))
+        }
+
+        browseCleanupModelsButton.setOnClickListener {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://openrouter.ai/models")))
+        }
 
         saveButton.setOnClickListener { savePrefs() }
 
@@ -117,16 +135,24 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyRouteUi(route: TranscriptionRoute) {
         val onDevice = route == TranscriptionRoute.ON_DEVICE
-        openRouterSection.alpha = if (onDevice) 0.4f else 1f
-        apiKeyInput.isEnabled = !onDevice
+        val cleanup = cleanupSwitch.isChecked
+        // Cleanup needs the API key even when transcription itself is on-device.
+        val keyNeeded = !onDevice || cleanup
+        openRouterSection.alpha = if (keyNeeded) 1f else 0.4f
+        apiKeyInput.isEnabled = keyNeeded
         modelInput.isEnabled = !onDevice
         browseModelsButton.isEnabled = !onDevice
+
+        cleanupModelInput.isEnabled = cleanup
+        browseCleanupModelsButton.isEnabled = cleanup
     }
 
     private fun loadPrefs() {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         apiKeyInput.setText(prefs.getString(getString(R.string.pref_api_key), ""))
         modelInput.setText(prefs.getString(getString(R.string.pref_model), DEFAULT_MODEL))
+        cleanupSwitch.isChecked = TranscriptCleanup.isEnabled(this)
+        cleanupModelInput.setText(TranscriptCleanup.model(this))
     }
 
     private fun savePrefs() {
@@ -138,6 +164,8 @@ class MainActivity : AppCompatActivity() {
             putString(getString(R.string.pref_model), model)
             apply()
         }
+        TranscriptCleanup.save(this, cleanupSwitch.isChecked, cleanupModelInput.text.toString().trim())
+        applyRouteUi(TranscriptionRoute.selected(this))
         Toast.makeText(this, "Settings saved", Toast.LENGTH_SHORT).show()
     }
 

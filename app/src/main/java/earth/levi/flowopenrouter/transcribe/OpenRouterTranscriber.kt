@@ -124,7 +124,7 @@ class OpenRouterTranscriber(
                     OpenRouterClient.transcribe(pcm, apiKey, model)
                 }
                 callback.onTranscript(transcript)
-            } catch (e: OpenRouterClient.TranscriptionException) {
+            } catch (e: OpenRouterClient.OpenRouterException) {
                 Log.e(TAG, "Transcription failed", e)
                 callback.onError(e.message ?: "Transcription failed")
             }
