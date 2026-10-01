@@ -5,11 +5,17 @@ import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.PixelFormat
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Build
+import android.os.Bundle
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
@@ -62,6 +68,11 @@ class FloAccessibilityService : AccessibilityService() {
     private var isRecording = false
     private var audioRecord: AudioRecord? = null
     private var pcmBuffer = ByteArrayOutputStream()
+
+    // On-device ASR (API 31+). When unavailable, recording falls back to the OpenRouter path.
+    private var useOnDeviceRecognizer = false
+    private var onDeviceRecognizer: SpeechRecognizer? = null
+
     private var recordingJob: Job? = null
     private var holdJob: Job? = null
     private var pointerDown = false
@@ -74,6 +85,7 @@ class FloAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         Log.i(TAG, "Accessibility service connected")
+        setupOnDeviceRecognizer()
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         bubbleView = BubbleView(this)
@@ -228,6 +240,12 @@ class FloAccessibilityService : AccessibilityService() {
 
         isRecording = true
         bubbleView?.setRecording(true)
+
+        if (useOnDeviceRecognizer) {
+            startRecognizerListening()
+            return
+        }
+
         pcmBuffer = ByteArrayOutputStream()
 
         val bufferSize = AudioRecord.getMinBufferSize(
@@ -292,6 +310,13 @@ class FloAccessibilityService : AccessibilityService() {
         if (!isRecording) return
         isRecording = false
 
+        if (useOnDeviceRecognizer) {
+            // Transcript arrives asynchronously via the RecognitionListener below.
+            bubbleView?.setProcessing(true)
+            onDeviceRecognizer?.stopListening()
+            return
+        }
+
         audioRecord?.stop()
         audioRecord?.release()
         audioRecord = null
@@ -326,6 +351,106 @@ class FloAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun setupOnDeviceRecognizer() {
+        // Lint needs the SDK guard inline (short-circuit) to accept the API-31 calls below.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            !SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+        ) {
+            Log.i(TAG, "On-device recognition unavailable — using OpenRouter fallback")
+            return
+        }
+        val recognizer = try {
+            SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to create on-device recognizer", e)
+            return
+        }
+        recognizer.setRecognitionListener(recognitionListener)
+        onDeviceRecognizer = recognizer
+        useOnDeviceRecognizer = true
+        Log.i(TAG, "On-device speech recognizer ready")
+    }
+
+    private fun startRecognizerListening() {
+        val recognizer = onDeviceRecognizer
+        if (recognizer == null) {
+            isRecording = false
+            bubbleView?.setRecording(false)
+            showToast("On-device speech recognition unavailable")
+            return
+        }
+
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            // Push-to-talk: silence must not end the session before the user releases the bubble.
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, MAX_RECORD_SECONDS * 1000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, MAX_RECORD_SECONDS * 1000L)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                // Punctuation + capitalization, matching the previous Whisper output.
+                putExtra(RecognizerIntent.EXTRA_ENABLE_FORMATTING, RecognizerIntent.FORMATTING_OPTIMIZE_QUALITY)
+            }
+        }
+
+        try {
+            recognizer.startListening(intent)
+            Log.i(TAG, "On-device recognition started")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start on-device recognition", e)
+            isRecording = false
+            bubbleView?.setRecording(false)
+            showToast("Could not start recognition: ${e.message}")
+        }
+    }
+
+    private val recognitionListener = object : RecognitionListener {
+        override fun onReadyForSpeech(params: Bundle?) {}
+        override fun onBeginningOfSpeech() {}
+        override fun onRmsChanged(rmsdB: Float) {}
+        override fun onBufferReceived(buffer: ByteArray?) {}
+        override fun onEndOfSpeech() {}
+        override fun onPartialResults(partialResults: Bundle?) {}
+        override fun onEvent(eventType: Int, params: Bundle?) {}
+
+        override fun onResults(results: Bundle?) {
+            isRecording = false
+            bubbleView?.setProcessing(false)
+            // Formatted hypothesis is first when EXTRA_ENABLE_FORMATTING is set.
+            val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                ?.firstOrNull().orEmpty()
+            if (text.isBlank()) {
+                Log.w(TAG, "Empty on-device transcript")
+                showToast("No speech detected")
+            } else {
+                Log.i(TAG, "On-device transcript: '$text'")
+                pasteText(text)
+                showToast("Pasted transcript")
+            }
+        }
+
+        override fun onError(error: Int) {
+            Log.e(TAG, "On-device recognition error: $error")
+            isRecording = false
+            bubbleView?.setProcessing(false)
+            showToast(onDeviceErrorMessage(error))
+        }
+    }
+
+    private fun onDeviceErrorMessage(error: Int): String = when (error) {
+        SpeechRecognizer.ERROR_NO_MATCH,
+        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech detected"
+        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
+            "Microphone permission missing — enable it in the Flow app settings"
+        SpeechRecognizer.ERROR_NETWORK,
+        SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network error"
+        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Recognizer busy — try again"
+        SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ->
+            "On-device model for your language isn't downloaded"
+        SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ->
+            "Language not supported by the on-device recognizer"
+        SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
+        else -> "Recognition failed (error $error)"
+    }
+
     private fun showToast(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
@@ -338,6 +463,8 @@ class FloAccessibilityService : AccessibilityService() {
         holdJob?.cancel()
         recordingJob?.cancel()
         scope.cancel()
+        onDeviceRecognizer?.destroy()
+        onDeviceRecognizer = null
         audioRecord?.let {
             try { it.stop() } catch (_: Exception) {}
             it.release()
