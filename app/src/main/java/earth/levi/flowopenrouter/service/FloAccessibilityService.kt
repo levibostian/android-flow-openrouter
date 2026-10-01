@@ -21,6 +21,7 @@ import earth.levi.flowopenrouter.overlay.BubbleView
 import earth.levi.flowopenrouter.transcribe.OnDeviceTranscriber
 import earth.levi.flowopenrouter.transcribe.OpenRouterTranscriber
 import earth.levi.flowopenrouter.transcribe.Transcriber
+import earth.levi.flowopenrouter.transcribe.TranscriptionRoute
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -52,7 +53,8 @@ class FloAccessibilityService : AccessibilityService() {
     private var windowManager: WindowManager? = null
     private var bubbleParams: WindowManager.LayoutParams? = null
 
-    private lateinit var transcriber: Transcriber
+    private var transcriber: Transcriber? = null
+    private var currentRoute: TranscriptionRoute? = null
 
     @Volatile
     private var isRecording = false
@@ -88,10 +90,7 @@ class FloAccessibilityService : AccessibilityService() {
         instance = this
         Log.i(TAG, "Accessibility service connected")
 
-        transcriber = OnDeviceTranscriber.create(this, transcriptionCallback)
-            ?: OpenRouterTranscriber(this, transcriptionCallback).also {
-                Log.i(TAG, "No on-device recognizer — using OpenRouter transcription")
-            }
+        transcriberForCurrentRoute()
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         bubbleView = BubbleView(this)
@@ -244,7 +243,26 @@ class FloAccessibilityService : AccessibilityService() {
         }
         isRecording = true
         bubbleView?.setRecording(true)
-        transcriber.start()
+        transcriberForCurrentRoute().start()
+    }
+
+    /** Rebuilds the backend only when the saved route changed, so the UI toggle applies on next press. */
+    private fun transcriberForCurrentRoute(): Transcriber {
+        val route = TranscriptionRoute.selected(this)
+        val existing = transcriber
+        if (existing != null && route == currentRoute) return existing
+
+        existing?.release()
+        val next = when (route) {
+            TranscriptionRoute.ON_DEVICE ->
+                OnDeviceTranscriber.create(this, transcriptionCallback)
+                    ?: OpenRouterTranscriber(this, transcriptionCallback)
+            TranscriptionRoute.OPENROUTER -> OpenRouterTranscriber(this, transcriptionCallback)
+        }
+        transcriber = next
+        currentRoute = route
+        Log.i(TAG, "Transcription route: $route")
+        return next
     }
 
     private fun stopRecording() {
@@ -252,7 +270,7 @@ class FloAccessibilityService : AccessibilityService() {
         isRecording = false
         // Transcript arrives asynchronously via transcriptionCallback.
         bubbleView?.setProcessing(true)
-        transcriber.stop()
+        transcriber?.stop()
     }
 
     private fun endSession() {
@@ -271,7 +289,7 @@ class FloAccessibilityService : AccessibilityService() {
         isRecording = false
         holdJob?.cancel()
         scope.cancel()
-        if (::transcriber.isInitialized) transcriber.release()
+        transcriber?.release()
         bubbleView?.let {
             try { windowManager?.removeView(it) } catch (_: Exception) {}
         }

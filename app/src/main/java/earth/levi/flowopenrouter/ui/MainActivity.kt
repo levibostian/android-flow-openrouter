@@ -8,9 +8,12 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import android.view.View
 import android.view.accessibility.AccessibilityManager
 import android.widget.Button
 import android.widget.EditText
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -18,6 +21,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import earth.levi.flowopenrouter.R
 import earth.levi.flowopenrouter.service.FloAccessibilityService
+import earth.levi.flowopenrouter.transcribe.TranscriptionRoute
 
 class MainActivity : AppCompatActivity() {
 
@@ -27,6 +31,9 @@ class MainActivity : AppCompatActivity() {
         private const val DEFAULT_MODEL = "openai/whisper-1"
     }
 
+    private lateinit var routeGroup: RadioGroup
+    private lateinit var routeOnDevice: RadioButton
+    private lateinit var openRouterSection: View
     private lateinit var apiKeyInput: EditText
     private lateinit var modelInput: EditText
     private lateinit var browseModelsButton: Button
@@ -46,7 +53,11 @@ class MainActivity : AppCompatActivity() {
         saveButton = findViewById(R.id.save_button)
         enableAccessibilityButton = findViewById(R.id.enable_accessibility_button)
         enableOverlayButton = findViewById(R.id.enable_overlay_button)
+        routeGroup = findViewById(R.id.route_group)
+        routeOnDevice = findViewById(R.id.route_on_device)
+        openRouterSection = findViewById(R.id.openrouter_section)
 
+        setupRouteUi()
         loadPrefs()
 
         saveButton.setOnClickListener { savePrefs() }
@@ -78,6 +89,38 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         updateStatus()
+    }
+
+    private fun setupRouteUi() {
+        if (!TranscriptionRoute.isOnDeviceAvailable(this)) {
+            routeOnDevice.isEnabled = false
+            routeOnDevice.text = "On-device (not available on this device)"
+        }
+
+        val selected = TranscriptionRoute.selected(this)
+        routeGroup.check(
+            if (selected == TranscriptionRoute.ON_DEVICE) R.id.route_on_device else R.id.route_openrouter
+        )
+        applyRouteUi(selected)
+
+        routeGroup.setOnCheckedChangeListener { _, checkedId ->
+            val route = if (checkedId == R.id.route_on_device) {
+                TranscriptionRoute.ON_DEVICE
+            } else {
+                TranscriptionRoute.OPENROUTER
+            }
+            // Route changes apply immediately; the OpenRouter credentials still need Save Settings.
+            TranscriptionRoute.save(this, route)
+            applyRouteUi(route)
+        }
+    }
+
+    private fun applyRouteUi(route: TranscriptionRoute) {
+        val onDevice = route == TranscriptionRoute.ON_DEVICE
+        openRouterSection.alpha = if (onDevice) 0.4f else 1f
+        apiKeyInput.isEnabled = !onDevice
+        modelInput.isEnabled = !onDevice
+        browseModelsButton.isEnabled = !onDevice
     }
 
     private fun loadPrefs() {
